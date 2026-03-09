@@ -306,4 +306,13 @@ for dir in mipmap-hdpi mipmap-mdpi mipmap-xhdpi mipmap-xxhdpi; do
     echo "$LAUNCHER_XML" > "app/src/main/res/$dir/ic_launcher_round.xml"
 done
 
+# ===== gradlew =====
+cat > gradlew << 'EOF'
+#!/usr/bin/env sh
+APP_HOME="$(cd "$(dirname "$0")"; pwd)"
+exec java -classpath "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
+  org.gradle.wrapper.GradleWrapperMain "$@"
+EOF
+chmod +x gradlew
+
 echo "=== Projektstruktur vollständig erstellt ==="
