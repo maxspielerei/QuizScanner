@@ -1,0 +1,40 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Projekt herunterladen
+        uses: actions/checkout@v3
+
+      - name: Java einrichten
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Projektdateien erzeugen
+        run: |
+          chmod +x setup.sh
+          bash setup.sh
+
+      - name: Gradle Wrapper laden
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Gradle ausführbar machen
+        run: chmod +x gradlew
+
+      - name: APK bauen
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: APK bereitstellen
+        uses: actions/upload-artifact@v3
+        with:
+          name: QuizScanner-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
