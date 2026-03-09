@@ -10,6 +10,7 @@ mkdir -p app/src/main/res/drawable
 mkdir -p app/src/main/res/mipmap-anydpi-v26
 mkdir -p gradle/wrapper
 
+# ===== build.gradle (root) =====
 cat > build.gradle << 'EOF'
 buildscript {
     repositories { google(); mavenCentral() }
@@ -52,6 +53,7 @@ exec java -classpath "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
 EOF
 chmod +x gradlew
 
+# ===== app/build.gradle =====
 cat > app/build.gradle << 'EOF'
 plugins { id 'com.android.application' }
 android {
@@ -59,7 +61,7 @@ android {
     defaultConfig {
         applicationId "com.quiz.scanner"
         minSdk 21
-        targetSdk 33
+        targetSdk 29
         versionCode 1
         versionName "1.0"
     }
@@ -85,12 +87,15 @@ cat > app/proguard-rules.pro << 'EOF'
 -keep class de.markusfisch.android.barcodescannerview.** { *; }
 EOF
 
+# ===== AndroidManifest.xml =====
+# targetSdk 29 + requestLegacyExternalStorage erlaubt file:// Zugriff auf /storage/emulated/0/
 cat > app/src/main/AndroidManifest.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.quiz.scanner">
 
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
@@ -99,6 +104,7 @@ cat > app/src/main/AndroidManifest.xml << 'EOF'
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
+        android:requestLegacyExternalStorage="true"
         android:theme="@style/Theme.QuizScanner">
 
         <activity
@@ -120,10 +126,11 @@ cat > app/src/main/AndroidManifest.xml << 'EOF'
 </manifest>
 EOF
 
-# ===== MainActivity.java - basierend auf Markus Fischs Originalcode =====
+# ===== MainActivity.java =====
 cat > app/src/main/java/com/quiz/scanner/MainActivity.java << 'EOF'
 package com.quiz.scanner;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -139,19 +146,20 @@ public class MainActivity extends Activity {
 
     private static final int REQUEST_CAMERA = 1;
     private BarcodeScannerView scannerView;
-    private boolean launched = false;
+    private volatile boolean launched = false;
 
     @Override
-    public void onRequestPermissionsResult(
-            int requestCode,
-            String[] permissions,
-            int[] grantResults) {
-        if (requestCode == REQUEST_CAMERA &&
-                grantResults.length > 0 &&
-                grantResults[0] != PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(this, "Kamera-Berechtigung erforderlich!",
-                    Toast.LENGTH_SHORT).show();
-            finish();
+    public void onRequestPermissionsResult(int requestCode,
+            String[] permissions, int[] grantResults) {
+        if (requestCode == REQUEST_CAMERA) {
+            if (grantResults.length > 0 &&
+                    grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Kamera-Berechtigung erforderlich!",
+                        Toast.LENGTH_LONG).show();
+                finish();
+            } else {
+                scannerView.openAsync();
+            }
         }
     }
 
@@ -160,32 +168,33 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        checkPermissions();
         setContentView(R.layout.activity_main);
 
         scannerView = findViewById(R.id.scanner);
         scannerView.setCropRatio(.75f);
 
         scannerView.setOnBarcodeListener(result -> {
-            // Wird im Camera-Thread aufgerufen
+            // Läuft im Camera-Thread
             if (!launched) {
                 launched = true;
-                String url = result.getText().trim();
-                runOnUiThread(() -> {
-                    Intent intent = new Intent(MainActivity.this, WebViewActivity.class);
-                    intent.putExtra(WebViewActivity.EXTRA_URL, url);
-                    startActivity(intent);
-                });
+                final String url = result.getText().trim();
+                runOnUiThread(() -> openUrl(url));
             }
-            return false; // Scannen stoppen bis Resume
+            return false; // Stoppe Scanner nach Scan
         });
+
+        checkPermissions();
     }
 
     @Override
     public void onResume() {
         super.onResume();
         launched = false;
-        scannerView.openAsync();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                checkSelfPermission(Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED) {
+            scannerView.openAsync();
+        }
     }
 
     @Override
@@ -194,11 +203,19 @@ public class MainActivity extends Activity {
         scannerView.close();
     }
 
+    private void openUrl(String url) {
+        Intent intent = new Intent(this, WebViewActivity.class);
+        intent.putExtra(WebViewActivity.EXTRA_URL, url);
+        startActivity(intent);
+    }
+
     private void checkPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            String permission = android.Manifest.permission.CAMERA;
-            if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{permission}, REQUEST_CAMERA);
+            if (checkSelfPermission(Manifest.permission.CAMERA)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                        new String[]{Manifest.permission.CAMERA},
+                        REQUEST_CAMERA);
             }
         }
     }
@@ -209,8 +226,11 @@ EOF
 cat > app/src/main/java/com/quiz/scanner/WebViewActivity.java << 'EOF'
 package com.quiz.scanner;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -219,7 +239,9 @@ import android.webkit.WebViewClient;
 public class WebViewActivity extends Activity {
 
     public static final String EXTRA_URL = "url";
+    private static final int REQUEST_STORAGE = 2;
     private WebView webView;
+    private String pendingUrl;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -235,12 +257,34 @@ public class WebViewActivity extends Activity {
         s.setAllowFileAccessFromFileURLs(true);
         s.setAllowUniversalAccessFromFileURLs(true);
         s.setDomStorageEnabled(true);
+        s.setMediaPlaybackRequiresUserGesture(false);
 
         webView.setWebViewClient(new WebViewClient());
 
-        String url = getIntent().getStringExtra(EXTRA_URL);
-        if (url != null && !url.isEmpty()) {
-            webView.loadUrl(url);
+        pendingUrl = getIntent().getStringExtra(EXTRA_URL);
+
+        // READ_EXTERNAL_STORAGE für file:// Zugriff auf Android 6-9
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                    REQUEST_STORAGE);
+        } else {
+            loadUrl();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+            String[] permissions, int[] grantResults) {
+        loadUrl(); // URL laden, egal ob erlaubt oder nicht
+    }
+
+    private void loadUrl() {
+        if (pendingUrl != null && !pendingUrl.isEmpty()) {
+            webView.loadUrl(pendingUrl);
         }
     }
 
