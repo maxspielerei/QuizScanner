@@ -222,6 +222,7 @@ public class MainActivity extends Activity {
 }
 EOF
 
+
 # ===== WebViewActivity.java =====
 cat > app/src/main/java/com/quiz/scanner/WebViewActivity.java << 'EOF'
 package com.quiz.scanner;
@@ -229,9 +230,12 @@ package com.quiz.scanner;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -257,13 +261,31 @@ public class WebViewActivity extends Activity {
         s.setAllowFileAccessFromFileURLs(true);
         s.setAllowUniversalAccessFromFileURLs(true);
         s.setDomStorageEnabled(true);
-        s.setMediaPlaybackRequiresUserGesture(false);
 
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request,
+                    WebResourceError error) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    runOnUiThread(() ->
+                        new AlertDialog.Builder(WebViewActivity.this)
+                            .setTitle("Fehler beim Laden")
+                            .setMessage("Datei nicht gefunden:\n" + pendingUrl
+                                + "\n\nFehler: " + error.getDescription())
+                            .setPositiveButton("OK", (d, w) -> finish())
+                            .show()
+                    );
+                }
+            }
+        });
 
         pendingUrl = getIntent().getStringExtra(EXTRA_URL);
 
-        // READ_EXTERNAL_STORAGE für file:// Zugriff auf Android 6-9
+        if (pendingUrl == null || pendingUrl.isEmpty()) {
+            showError("Keine URL empfangen.");
+            return;
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
                 Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
                 checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -279,13 +301,19 @@ public class WebViewActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode,
             String[] permissions, int[] grantResults) {
-        loadUrl(); // URL laden, egal ob erlaubt oder nicht
+        loadUrl();
     }
 
     private void loadUrl() {
-        if (pendingUrl != null && !pendingUrl.isEmpty()) {
-            webView.loadUrl(pendingUrl);
-        }
+        webView.loadUrl(pendingUrl);
+    }
+
+    private void showError(String msg) {
+        new AlertDialog.Builder(this)
+            .setTitle("Fehler")
+            .setMessage(msg)
+            .setPositiveButton("OK", (d, w) -> finish())
+            .show();
     }
 
     @Override
