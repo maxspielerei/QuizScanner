@@ -92,7 +92,7 @@ android {
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.9.0'
-    implementation 'com.github.markusfisch:BarcodeScannerView:1.4.1'
+    implementation 'com.github.markusfisch:BarcodeScannerView:1.6.5'
 }
 EOF
 
