@@ -294,17 +294,17 @@ cat > app/src/main/res/drawable/ic_qr.xml << 'EOF'
 </vector>
 EOF
 
-# ===== Launcher Icons (alle Auflösungen) =====
+# ===== Launcher Icons (v26+ Ordner) =====
+mkdir -p app/src/main/res/mipmap-anydpi-v26
+
 LAUNCHER_XML='<?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
     <foreground android:drawable="@drawable/ic_qr"/>
 </adaptive-icon>'
 
-for dir in mipmap-hdpi mipmap-mdpi mipmap-xhdpi mipmap-xxhdpi; do
-    echo "$LAUNCHER_XML" > "app/src/main/res/$dir/ic_launcher.xml"
-    echo "$LAUNCHER_XML" > "app/src/main/res/$dir/ic_launcher_round.xml"
-done
+echo "$LAUNCHER_XML" > "app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+echo "$LAUNCHER_XML" > "app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml"
 
 # ===== gradlew =====
 cat > gradlew << 'EOF'
