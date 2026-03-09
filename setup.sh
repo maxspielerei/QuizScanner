@@ -93,6 +93,10 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.9.0'
     implementation 'com.github.markusfisch:BarcodeScannerView:1.6.5'
+    constraints {
+        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22') { because 'fix duplicate kotlin classes' }
+        implementation('org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22') { because 'fix duplicate kotlin classes' }
+    }
 }
 EOF
 
@@ -223,8 +227,6 @@ cat > app/src/main/java/com/quiz/scanner/WebViewActivity.java << 'EOF'
 package com.quiz.scanner;
 
 import android.annotation.SuppressLint;
-import android.content.Intent;
-import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -257,7 +259,7 @@ public class WebViewActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return false; // Alles im WebView öffnen
+                return false;
             }
         });
 
