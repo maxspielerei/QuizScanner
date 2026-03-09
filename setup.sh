@@ -7,10 +7,7 @@ mkdir -p app/src/main/java/com/quiz/scanner
 mkdir -p app/src/main/res/layout
 mkdir -p app/src/main/res/values
 mkdir -p app/src/main/res/drawable
-mkdir -p app/src/main/res/mipmap-hdpi
-mkdir -p app/src/main/res/mipmap-mdpi
-mkdir -p app/src/main/res/mipmap-xhdpi
-mkdir -p app/src/main/res/mipmap-xxhdpi
+mkdir -p app/src/main/res/mipmap-anydpi-v26
 mkdir -p gradle/wrapper
 
 # ===== build.gradle (root) =====
@@ -28,6 +25,7 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://jitpack.io' }
     }
 }
 task clean(type: Delete) {
@@ -57,6 +55,15 @@ zipStoreBase=GRADLE_USER_HOME
 zipStorePath=wrapper/dists
 EOF
 
+# ===== gradlew =====
+cat > gradlew << 'EOF'
+#!/usr/bin/env sh
+APP_HOME="$(cd "$(dirname "$0")"; pwd)"
+exec java -classpath "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
+  org.gradle.wrapper.GradleWrapperMain "$@"
+EOF
+chmod +x gradlew
+
 # ===== app/build.gradle =====
 cat > app/build.gradle << 'EOF'
 plugins {
@@ -85,15 +92,13 @@ android {
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.9.0'
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
-    implementation 'com.google.zxing:core:3.5.1'
+    implementation 'com.github.markusfisch:BarcodeScannerView:1.4.1'
 }
 EOF
 
 # ===== app/proguard-rules.pro =====
 cat > app/proguard-rules.pro << 'EOF'
--keep class com.journeyapps.barcodescanner.** { *; }
+-keep class de.markusfisch.android.barcodescannerview.** { *; }
 -keep class com.google.zxing.** { *; }
 EOF
 
@@ -102,25 +107,34 @@ cat > app/src/main/AndroidManifest.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.quiz.scanner">
+
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-feature android:name="android.hardware.camera" android:required="false" />
-    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.QuizScanner">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="portrait">
+            android:screenOrientation="fullSensor">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".WebViewActivity"
+            android:exported="false"
+            android:screenOrientation="fullSensor" />
+
     </application>
 </manifest>
 EOF
@@ -129,85 +143,137 @@ EOF
 cat > app/src/main/java/com/quiz/scanner/MainActivity.java << 'EOF'
 package com.quiz.scanner;
 
-import android.content.ActivityNotFoundException;
+import android.Manifest;
 import android.content.Intent;
-import android.net.Uri;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.widget.Button;
-import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import com.journeyapps.barcodescanner.ScanContract;
-import com.journeyapps.barcodescanner.ScanIntentResult;
-import com.journeyapps.barcodescanner.ScanOptions;
-import androidx.activity.result.ActivityResultLauncher;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
+import de.markusfisch.android.barcodescannerview.widget.BarcodeScannerView;
 
 public class MainActivity extends AppCompatActivity {
 
-    private TextView statusText;
-
-    private final ActivityResultLauncher<ScanOptions> scanLauncher =
-            registerForActivityResult(new ScanContract(), this::handleScanResult);
+    private static final int CAMERA_PERMISSION_REQUEST = 100;
+    private BarcodeScannerView scannerView;
+    private boolean resultHandled = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        statusText = findViewById(R.id.statusText);
-        Button scanButton = findViewById(R.id.scanButton);
-        scanButton.setOnClickListener(v -> startScan());
-        startScan();
-    }
 
-    private void startScan() {
-        statusText.setText(R.string.status_scanning);
-        ScanOptions options = new ScanOptions();
-        options.setDesiredBarcodeFormats(ScanOptions.QR_CODE);
-        options.setPrompt(getString(R.string.scan_prompt));
-        options.setCameraId(0);
-        options.setBeepEnabled(true);
-        options.setBarcodeImageEnabled(false);
-        options.setOrientationLocked(false);
-        scanLauncher.launch(options);
-    }
+        scannerView = findViewById(R.id.barcode_scanner_view);
 
-    private void handleScanResult(ScanIntentResult result) {
-        if (result.getContents() == null) {
-            statusText.setText(R.string.status_cancelled);
-            return;
+        scannerView.setOnScanListener(barcode -> {
+            if (resultHandled) return;
+            resultHandled = true;
+
+            String url = barcode.toString().trim();
+            Intent intent = new Intent(MainActivity.this, WebViewActivity.class);
+            intent.putExtra(WebViewActivity.EXTRA_URL, url);
+            startActivity(intent);
+        });
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.CAMERA},
+                    CAMERA_PERMISSION_REQUEST);
         }
-        String scannedUrl = result.getContents().trim();
-        statusText.setText(getString(R.string.status_found, scannedUrl));
-        openInChrome(scannedUrl);
     }
 
-    private void openInChrome(String url) {
-        Uri uri;
-        try {
-            uri = Uri.parse(url);
-        } catch (Exception e) {
-            showError(getString(R.string.error_invalid_url, url));
-            return;
+    @Override
+    protected void onResume() {
+        super.onResume();
+        resultHandled = false;
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED) {
+            scannerView.openAsync(this);
         }
-        Intent chromeIntent = new Intent(Intent.ACTION_VIEW, uri);
-        chromeIntent.setPackage("com.android.chrome");
-        chromeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        try {
-            startActivity(chromeIntent);
-        } catch (ActivityNotFoundException e) {
-            Intent fallbackIntent = new Intent(Intent.ACTION_VIEW, uri);
-            fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            try {
-                startActivity(fallbackIntent);
-            } catch (ActivityNotFoundException ex) {
-                showError(getString(R.string.error_no_browser));
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        scannerView.close();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+            @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == CAMERA_PERMISSION_REQUEST) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                scannerView.openAsync(this);
+            } else {
+                Toast.makeText(this, "Kamera-Berechtigung erforderlich!", Toast.LENGTH_LONG).show();
             }
         }
     }
+}
+EOF
 
-    private void showError(String message) {
-        statusText.setText(message);
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+# ===== WebViewActivity.java =====
+cat > app/src/main/java/com/quiz/scanner/WebViewActivity.java << 'EOF'
+package com.quiz.scanner;
+
+import android.annotation.SuppressLint;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+
+import androidx.appcompat.app.AppCompatActivity;
+
+public class WebViewActivity extends AppCompatActivity {
+
+    public static final String EXTRA_URL = "url";
+
+    private WebView webView;
+
+    @SuppressLint("SetJavaScriptEnabled")
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_webview);
+
+        webView = findViewById(R.id.web_view);
+
+        WebSettings settings = webView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setAllowFileAccess(true);
+        settings.setAllowFileAccessFromFileURLs(true);
+        settings.setAllowUniversalAccessFromFileURLs(true);
+        settings.setDomStorageEnabled(true);
+
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return false; // Alles im WebView öffnen
+            }
+        });
+
+        String url = getIntent().getStringExtra(EXTRA_URL);
+        if (url != null && !url.isEmpty()) {
+            webView.loadUrl(url);
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (webView.canGoBack()) {
+            webView.goBack();
+        } else {
+            super.onBackPressed();
+        }
     }
 }
 EOF
@@ -215,33 +281,43 @@ EOF
 # ===== activity_main.xml =====
 cat > app/src/main/res/layout/activity_main.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:padding="32dp"
-    android:background="#1a1a2e">
+    android:background="#000000">
+
+    <de.markusfisch.android.barcodescannerview.widget.BarcodeScannerView
+        android:id="@+id/barcode_scanner_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <TextView
-        android:id="@+id/statusText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/status_ready"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="40dp"
+        android:text="@string/scan_hint"
         android:textColor="#ffffff"
-        android:textSize="20sp"
-        android:gravity="center"
-        android:layout_marginBottom="40dp" />
-    <Button
-        android:id="@+id/scanButton"
-        android:layout_width="wrap_content"
-        android:layout_height="56dp"
-        android:paddingStart="40dp"
-        android:paddingEnd="40dp"
-        android:text="@string/button_scan"
-        android:textSize="18sp"
-        android:textColor="#1a1a2e"
-        android:backgroundTint="#f5a623" />
-</LinearLayout>
+        android:textSize="16sp"
+        android:background="#88000000"
+        android:padding="12dp" />
+
+</FrameLayout>
+EOF
+
+# ===== activity_webview.xml =====
+cat > app/src/main/res/layout/activity_webview.xml << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <WebView
+        android:id="@+id/web_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+</FrameLayout>
 EOF
 
 # ===== strings.xml =====
@@ -249,14 +325,7 @@ cat > app/src/main/res/values/strings.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Quiz Scanner</string>
-    <string name="button_scan">QR-Code scannen</string>
-    <string name="scan_prompt">QR-Code in den Rahmen halten</string>
-    <string name="status_ready">Bereit zum Scannen</string>
-    <string name="status_scanning">Scanner wird geöffnet…</string>
-    <string name="status_cancelled">Scan abgebrochen. Bitte erneut versuchen.</string>
-    <string name="status_found">Öffne: %1$s</string>
-    <string name="error_invalid_url">Ungültige URL: %1$s</string>
-    <string name="error_no_browser">Kein Browser gefunden!</string>
+    <string name="scan_hint">QR-Code in den Rahmen halten</string>
 </resources>
 EOF
 
@@ -264,11 +333,9 @@ EOF
 cat > app/src/main/res/values/themes.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.QuizScanner" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.QuizScanner" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="colorPrimary">#f5a623</item>
-        <item name="colorPrimaryVariant">#c47d00</item>
-        <item name="colorOnPrimary">#1a1a2e</item>
-        <item name="android:statusBarColor">#1a1a2e</item>
+        <item name="android:statusBarColor">#000000</item>
     </style>
 </resources>
 EOF
@@ -281,12 +348,12 @@ cat > app/src/main/res/values/colors.xml << 'EOF'
 </resources>
 EOF
 
-# ===== ic_qr.xml =====
-cat > app/src/main/res/drawable/ic_qr.xml << 'EOF'
+# ===== ic_launcher Drawable =====
+cat > app/src/main/res/drawable/ic_launcher_foreground.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="120dp"
-    android:height="120dp"
+    android:width="108dp"
+    android:height="108dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path android:fillColor="#f5a623"
@@ -294,25 +361,13 @@ cat > app/src/main/res/drawable/ic_qr.xml << 'EOF'
 </vector>
 EOF
 
-# ===== Launcher Icons (v26+ Ordner) =====
-mkdir -p app/src/main/res/mipmap-anydpi-v26
-
+# ===== Adaptive Icon =====
 LAUNCHER_XML='<?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
-    <foreground android:drawable="@drawable/ic_qr"/>
+    <foreground android:drawable="@drawable/ic_launcher_foreground"/>
 </adaptive-icon>'
+echo "$LAUNCHER_XML" > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+echo "$LAUNCHER_XML" > app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
-echo "$LAUNCHER_XML" > "app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
-echo "$LAUNCHER_XML" > "app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml"
-
-# ===== gradlew =====
-cat > gradlew << 'EOF'
-#!/usr/bin/env sh
-APP_HOME="$(cd "$(dirname "$0")"; pwd)"
-exec java -classpath "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \
-  org.gradle.wrapper.GradleWrapperMain "$@"
-EOF
-chmod +x gradlew
-
-echo "=== Projektstruktur vollständig erstellt ==="
+echo "=== Fertig ==="
