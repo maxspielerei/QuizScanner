@@ -197,7 +197,7 @@ public class MainActivity extends AppCompatActivity {
         resultHandled = false;
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 == PackageManager.PERMISSION_GRANTED) {
-            scannerView.openAsync(this);
+            scannerView.openAsync(false);
         }
     }
 
@@ -213,7 +213,7 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == CAMERA_PERMISSION_REQUEST) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                scannerView.openAsync(this);
+                scannerView.openAsync(false);
             } else {
                 Toast.makeText(this, "Kamera-Berechtigung erforderlich!", Toast.LENGTH_LONG).show();
             }
